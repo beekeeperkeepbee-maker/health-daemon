@@ -15,9 +15,12 @@ DATA_FILE = "health_data.json"
 WATER_GOAL = 3
 WATER_INTERVAL_MINUTES = 120  # two hours
 
+EYE_INTERVAL_MINUTES = 20  # 20 minutes for eye break
+
 # Global variables
 water_drunk = 0
 last_water_alert = time.time()
+last_eye_alert = time.time()
 alarm_active = False
 current_sound_process = None
 
@@ -50,7 +53,6 @@ def play_sound_async():
     """Play sound in a background process so we can kill it."""
     global current_sound_process
     try:
-        # Use subprocess to play sound so we can terminate it
         current_sound_process = subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", AUDIO_FILE])
     except Exception as e:
         print(f"Could not play sound: {e}. Trying alternative method...")
@@ -60,17 +62,15 @@ def play_sound_async():
             print(f"Alternative sound method also failed: {e2}")
 
 def send_alert(title, message):
+    """Send a water reminder: sound, notification, and open browser."""
     global alarm_active
     alarm_active = True
     print(f"\nALERT: {message}")
     
-    stop_sound() # Stop any previous sound first
-    
-    # Play sound in background
+    stop_sound()
     sound_thread = threading.Thread(target=play_sound_async, daemon=True)
     sound_thread.start()
     
-    # Send system notification
     try:
         notification.notify(
             title=title,
@@ -81,24 +81,46 @@ def send_alert(title, message):
     except Exception as e:
         print(f"Notification failed: {e}")
 
-    # Open the web app
     webbrowser.open(WEB_APP_URL)
 
+def send_eye_alert():
+    """Send an eye break reminder: sound and notification only (no browser)."""
+    print("\nEYE BREAK: Look away from the screen for 20 seconds.")
+    stop_sound()
+    sound_thread = threading.Thread(target=play_sound_async, daemon=True)
+    sound_thread.start()
+    
+    try:
+        notification.notify(
+            title="Eye Break",
+            message="Look at something 20 feet away for 20 seconds.",
+            app_name="Health Monitor",
+            timeout=10
+        )
+    except Exception as e:
+        print(f"Notification failed: {e}")
+
 def timer_loop():
-    global last_water_alert, alarm_active
+    global last_water_alert, last_eye_alert, alarm_active
     while True:
         current_time = time.time()
-        minutes_passed = (current_time - last_water_alert) / 60
-
-        # Only fire if it's time AND we aren't already alarming AND goal not met
-        if minutes_passed >= WATER_INTERVAL_MINUTES and water_drunk < WATER_GOAL and not alarm_active:
+        
+        # Check water timer
+        water_minutes_passed = (current_time - last_water_alert) / 60
+        if water_minutes_passed >= WATER_INTERVAL_MINUTES and water_drunk < WATER_GOAL and not alarm_active:
             send_alert("Drink Water!", f"You have drunk {water_drunk}/{WATER_GOAL} glasses. Drink up!")
             last_water_alert = time.time()
+        
+        # Check eye timer
+        eye_minutes_passed = (current_time - last_eye_alert) / 60
+        if eye_minutes_passed >= EYE_INTERVAL_MINUTES:
+            send_eye_alert()
+            last_eye_alert = time.time()
         
         time.sleep(1)
 
 def main():
-    global water_drunk, last_water_alert, alarm_active
+    global water_drunk, last_water_alert, last_eye_alert, alarm_active
     load_progress()
     
     if water_drunk >= WATER_GOAL:
@@ -114,7 +136,6 @@ def main():
         while True:
             user_input = input("Press 'y' and Enter if you drank a glass of water (or 'q' to quit): ")
             if user_input.lower() == 'y':
-                # Stop the alarm and reset state
                 alarm_active = False
                 stop_sound()
                 
